@@ -50,12 +50,13 @@ int main(int argc, char ** argv)
     {
         // The required parameters were not specified.
         std::cerr << "Narrow down the stats to just a subset of positions.\n";
-        std::cerr << "Usage: subsetBaseQCStats --in <originalStatsFile> --regionList <subset of regions> --outStats <outputStatsFile>\n"
+        std::cerr << "Usage: subsetBaseQCStats --inStats <originalStatsFile> --regionList <subset of regions> --outStats <outputStatsFile>\n"
                   << "\n";
         std::cerr << "\t\t--inStats    : stats file to narrow down to just a subset of positions" << std::endl;
         std::cerr << "\t\t--regionList : File containing the subset of regions to keep (assumed to be sorted)\n"
                   << "\t\t               Formated as chr<tab>start_pos<tab>end_pos.\n" 
                   << "\t\t               Positions are 0 based and the end_pos is not included in the region." << std::endl;
+        std::cerr << "\t\t--outStats   : stats file to write the subset of stats into" << std::endl;
         return(-1);
     }
 
@@ -120,6 +121,8 @@ int main(int argc, char ** argv)
     // Done reading the input file.
     ifclose(inStats);
     ifclose(outStats);
+
+    std::cerr << "Done subsetBaseQCStats.\n";
 
     if(error)
     {
