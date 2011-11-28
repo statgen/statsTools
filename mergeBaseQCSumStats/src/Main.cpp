@@ -144,7 +144,7 @@ char* chromBuffer = new char[100];
 void usage()
 {
     std::cerr << "Merge baseQC Cout-Based Summary Statistics.\n";
-    std::cerr << "Usage: mergeStats --out <outputStatsFile> <inputStatsFiles>\n"
+    std::cerr << "Usage: mergeBaseQCSumStats --out <outputStatsFile> <inputStatsFiles>\n"
               << "\t--out output merged stats file\n"
               << "\tinputStatsFiles space separated list of files to merge.\n"
               << "\n";
