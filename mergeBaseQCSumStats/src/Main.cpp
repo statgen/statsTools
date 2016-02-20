@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2011  Regents of the University of Michigan
+ *  Copyright (C) 2011-2106  Regents of the University of Michigan
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -38,6 +38,7 @@ struct StoredInfo
     int avgMapQCount;
     int depth;
     int numQ20;
+    std::string chromStr;
 };
     
 
@@ -46,96 +47,11 @@ void updateSummary(const StoredInfo& nextLine, StoredInfo& sumLine);
 bool writeSummary(IFILE outputFile, StoredInfo& summaryLine);
 void initStoredInfo(StoredInfo& info);
 
-void setupChromMap(std::map <std::string, int> &chromMap);
-
-const char* chromNames[] = 
-    {"1",
-     "2",
-     "3",
-     "4",
-     "5",
-     "6",
-     "7",
-     "8",
-     "9",
-     "10",
-     "11",
-     "12",
-     "13",
-     "14",
-     "15",
-     "16",
-     "17",
-     "18",
-     "19",
-     "20",
-     "21",
-     "22",
-     "X",
-     "Y",
-     "MT",
-     "GL000207.1",
-     "GL000226.1",
-     "GL000229.1",
-     "GL000231.1",
-     "GL000210.1",
-     "GL000239.1",
-     "GL000235.1",
-     "GL000201.1",
-     "GL000247.1",
-     "GL000245.1",
-     "GL000197.1",
-     "GL000203.1",
-     "GL000246.1",
-     "GL000249.1",
-     "GL000196.1",
-     "GL000248.1",
-     "GL000244.1",
-     "GL000238.1",
-     "GL000202.1",
-     "GL000234.1",
-     "GL000232.1",
-     "GL000206.1",
-     "GL000240.1",
-     "GL000236.1",
-     "GL000241.1",
-     "GL000243.1",
-     "GL000242.1",
-     "GL000230.1",
-     "GL000237.1",
-     "GL000233.1",
-     "GL000204.1",
-     "GL000198.1",
-     "GL000208.1",
-     "GL000191.1",
-     "GL000227.1",
-     "GL000228.1",
-     "GL000214.1",
-     "GL000221.1",
-     "GL000209.1",
-     "GL000218.1",
-     "GL000220.1",
-     "GL000213.1",
-     "GL000211.1",
-     "GL000199.1",
-     "GL000217.1",
-     "GL000216.1",
-     "GL000215.1",
-     "GL000205.1",
-     "GL000219.1",
-     "GL000224.1",
-     "GL000223.1",
-     "GL000195.1",
-     "GL000212.1",
-     "GL000222.1",
-     "GL000200.1",
-     "GL000193.1",
-     "GL000194.1",
-     "GL000225.1",
-     "GL000192.1"
-    };
+int setupChromMap(const String &chrListFile, 
+                   std::map <std::string, int> &chromMap);
 
 std::map <std::string, int> chromMap;
+std::map <std::string, int> chromError;
 
 std::map<std::string,int>::iterator chromMapIter;
 
@@ -144,8 +60,9 @@ char* chromBuffer = new char[100];
 void usage()
 {
     std::cerr << "Merge baseQC Cout-Based Summary Statistics.\n";
-    std::cerr << "Usage: mergeBaseQCSumStats --out <outputStatsFile> <inputStatsFiles>\n"
+    std::cerr << "Usage: mergeBaseQCSumStats --out <outputStatsFile> [--chrList <faiFile>] <inputStatsFiles>\n"
               << "\t--out output merged stats file\n"
+              << "\t--chrList file containing order of chromosome names in the first tab-delimited column\n"
               << "\tinputStatsFiles space separated list of files to merge.\n"
               << "\n";
 
@@ -155,9 +72,11 @@ void usage()
 int main(int argc, char ** argv)
 {
     String output = "";
+    String chrListFile = "";
     ParameterList inputParameters;
     BEGIN_LONG_PARAMETERS(longParameterList)
         LONG_STRINGPARAMETER("out", &output)
+        LONG_STRINGPARAMETER("chrList", &chrListFile)
         END_LONG_PARAMETERS();
    
     inputParameters.Add(new LongParameters ("Input Parameters", 
@@ -183,8 +102,11 @@ int main(int argc, char ** argv)
         return(-1);
     }
 
-    setupChromMap(chromMap);
-
+    if(setupChromMap(chrListFile, chromMap) != 0)
+    {
+        return(-1);
+    }
+    
     // Open the output file.
     IFILE outputFile = ifopen(output, "w");
 
@@ -222,7 +144,6 @@ int main(int argc, char ** argv)
             nextLine[i].start = 0x7FFFFFFF;
         }
     }
-
     // write the header.
     ifprintf(outputFile, "%s\n", header.c_str());
 
@@ -322,10 +243,15 @@ bool readNextLine(IFILE inputFile, StoredInfo& nextLine, int& minChrom, int& min
     chromMapIter = chromMap.find(chromBuffer);
     if(chromMapIter == chromMap.end())
     {
-        std::cerr << "Skipping chromosome " << chromBuffer << std::endl;
+        ++chromError[chromBuffer];
+        if(chromError[chromBuffer] == 1)
+        {
+            std::cerr << "Skipping chromosome " << chromBuffer << std::endl;
+        }
         return(readNextLine(inputFile, nextLine, minChrom, minPos));
     }
     nextLine.chrom = chromMapIter->second;
+    nextLine.chromStr = chromBuffer;
 
     // Calculate the values for this data line.
     nextLine.sumMapQ = avgMapQ * nextLine.avgMapQCount;
@@ -346,6 +272,7 @@ bool readNextLine(IFILE inputFile, StoredInfo& nextLine, int& minChrom, int& min
 
 void updateSummary(const StoredInfo& nextLine, StoredInfo& sumLine)
 {
+    sumLine.chromStr = nextLine.chromStr;
     sumLine.chrom = nextLine.chrom;
     sumLine.start = nextLine.start;
     sumLine.end = nextLine.end;
@@ -377,7 +304,7 @@ bool writeSummary(IFILE outputFile, StoredInfo& summaryLine)
     }
     ifprintf(outputFile,
              "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.3f\t%d\t%d\t%d\n",
-             chromNames[summaryLine.chrom], summaryLine.start, summaryLine.end,
+             summaryLine.chromStr.c_str(), summaryLine.start, summaryLine.end,
              summaryLine.totalReads, summaryLine.numDups,
              summaryLine.numQCFail, summaryLine.numMapped,
              summaryLine.numPaired, summaryLine.numProper,
@@ -410,95 +337,129 @@ void initStoredInfo(StoredInfo& info)
     info.avgMapQCount = 0;
     info.depth = 0;
     info.numQ20 = 0;
+
+    info.chromStr.clear();
 }
 
 
-void setupChromMap(std::map <std::string, int> &chromMap)
+int setupChromMap(const String &chrListFile, std::map <std::string, int> &chromMap)
 {
     int mapIndex = 0;
-    chromMap["1"] = mapIndex; ++mapIndex;
-    chromMap["2"] = mapIndex; ++mapIndex;
-    chromMap["3"] = mapIndex; ++mapIndex;
-    chromMap["4"] = mapIndex; ++mapIndex;
-    chromMap["5"] = mapIndex; ++mapIndex;
-    chromMap["6"] = mapIndex; ++mapIndex;
-    chromMap["7"] = mapIndex; ++mapIndex;
-    chromMap["8"] = mapIndex; ++mapIndex;
-    chromMap["9"] = mapIndex; ++mapIndex;
-    chromMap["10"] = mapIndex; ++mapIndex;
-    chromMap["11"] = mapIndex; ++mapIndex;
-    chromMap["12"] = mapIndex; ++mapIndex;
-    chromMap["13"] = mapIndex; ++mapIndex;
-    chromMap["14"] = mapIndex; ++mapIndex;
-    chromMap["15"] = mapIndex; ++mapIndex;
-    chromMap["16"] = mapIndex; ++mapIndex;
-    chromMap["17"] = mapIndex; ++mapIndex;
-    chromMap["18"] = mapIndex; ++mapIndex;
-    chromMap["19"] = mapIndex; ++mapIndex;
-    chromMap["20"] = mapIndex; ++mapIndex;
-    chromMap["21"] = mapIndex; ++mapIndex;
-    chromMap["22"] = mapIndex; ++mapIndex;
-    chromMap["X"] = mapIndex; ++mapIndex;
-    chromMap["Y"] = mapIndex; ++mapIndex;
-    chromMap["MT"] = mapIndex; ++mapIndex;
-    chromMap["GL000207.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000226.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000229.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000231.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000210.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000239.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000235.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000201.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000247.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000245.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000197.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000203.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000246.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000249.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000196.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000248.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000244.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000238.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000202.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000234.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000232.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000206.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000240.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000236.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000241.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000243.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000242.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000230.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000237.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000233.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000204.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000198.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000208.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000191.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000227.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000228.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000214.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000221.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000209.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000218.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000220.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000213.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000211.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000199.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000217.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000216.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000215.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000205.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000219.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000224.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000223.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000195.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000212.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000222.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000200.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000193.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000194.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000225.1"] = mapIndex; ++mapIndex;
-    chromMap["GL000192.1"] = mapIndex; ++mapIndex;
+    if(chrListFile.IsEmpty())
+    {
+        chromMap["1"] = mapIndex; ++mapIndex;
+        chromMap["2"] = mapIndex; ++mapIndex;
+        chromMap["3"] = mapIndex; ++mapIndex;
+        chromMap["4"] = mapIndex; ++mapIndex;
+        chromMap["5"] = mapIndex; ++mapIndex;
+        chromMap["6"] = mapIndex; ++mapIndex;
+        chromMap["7"] = mapIndex; ++mapIndex;
+        chromMap["8"] = mapIndex; ++mapIndex;
+        chromMap["9"] = mapIndex; ++mapIndex;
+        chromMap["10"] = mapIndex; ++mapIndex;
+        chromMap["11"] = mapIndex; ++mapIndex;
+        chromMap["12"] = mapIndex; ++mapIndex;
+        chromMap["13"] = mapIndex; ++mapIndex;
+        chromMap["14"] = mapIndex; ++mapIndex;
+        chromMap["15"] = mapIndex; ++mapIndex;
+        chromMap["16"] = mapIndex; ++mapIndex;
+        chromMap["17"] = mapIndex; ++mapIndex;
+        chromMap["18"] = mapIndex; ++mapIndex;
+        chromMap["19"] = mapIndex; ++mapIndex;
+        chromMap["20"] = mapIndex; ++mapIndex;
+        chromMap["21"] = mapIndex; ++mapIndex;
+        chromMap["22"] = mapIndex; ++mapIndex;
+        chromMap["X"] = mapIndex; ++mapIndex;
+        chromMap["Y"] = mapIndex; ++mapIndex;
+        chromMap["MT"] = mapIndex; ++mapIndex;
+        chromMap["GL000207.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000226.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000229.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000231.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000210.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000239.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000235.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000201.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000247.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000245.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000197.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000203.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000246.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000249.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000196.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000248.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000244.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000238.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000202.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000234.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000232.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000206.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000240.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000236.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000241.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000243.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000242.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000230.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000237.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000233.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000204.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000198.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000208.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000191.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000227.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000228.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000214.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000221.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000209.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000218.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000220.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000213.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000211.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000199.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000217.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000216.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000215.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000205.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000219.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000224.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000223.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000195.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000212.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000222.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000200.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000193.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000194.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000225.1"] = mapIndex; ++mapIndex;
+        chromMap["GL000192.1"] = mapIndex; ++mapIndex;
+    }
+    else
+    {
+        // Read chrListFile.
+        IFILE chrList = ifopen(chrListFile.c_str(), "r");
+        if(chrList == NULL)
+        {
+            std::cerr << "Failed to open chrListFile: " << chrListFile << std::endl;
+            return(-1);
+        }
+        std::string chrom = "";
+        int readResult = 0;
+        // File was succesfully opened so read the regions.
+        while(readResult != -1)
+        {
+            readResult = chrList->readTilTab(chrom);
+            // If 1 was returned, it read til a tab, so discard the rest of the line
+            if(readResult == 1)
+            {
+                chrList->discardLine();
+            }
+            if(!chrom.empty())
+            {
+                chromMap[chrom] = mapIndex; ++mapIndex;
+            }
+            chrom.clear();
+        }
+        ifclose(chrList);
+    }
+    return(0);
 }
 
