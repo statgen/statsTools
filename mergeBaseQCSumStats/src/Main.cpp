@@ -55,7 +55,12 @@ std::map <std::string, int> chromError;
 
 std::map<std::string,int>::iterator chromMapIter;
 
+bool fullHeader = false;
+
 char* chromBuffer = new char[100];
+
+const char* fullHdrStr = "chrom\tchromStart\tchromEnd\tTotalReads\tDups\tQCFail\tMapped\tPaired\tProperPaired\tZeroMapQual\tMapQual<10\tMapQual255\tPassMapQual\tAverageMapQuality\tAverageMapQualCount\tDepth\tQ20Bases";
+const char* shortHdrStr = "chrom\tchromStart\tZeroMapQual\tAverageMapQuality\tAverageMapQualCount";
 
 void usage()
 {
@@ -124,6 +129,7 @@ int main(int argc, char ** argv)
     int nextMinChrom = 0x7FFFFFFF;
     int nextMinPos = 0x7FFFFFFF;
 
+    bool fail = false;
     for(int i = 0; i < numFiles; i++)
     {
         // Open the stats input files.
@@ -136,6 +142,22 @@ int main(int argc, char ** argv)
         // Read the first line (this is the header).
         header.ReadLine(inputFiles[i]);
 
+        // Validate the header.
+        if(header == fullHdrStr)
+        {
+            fullHeader = true;
+        }
+        else if(header == shortHdrStr)
+        {
+            fullHeader = false;
+        }
+        else
+        {
+            std::cerr << "ERROR: Only a full stats header and one with 'chrom, chromStart, ZeroMapQual, AverageMapQuality, AverageMapQualCount' are accepted.\nThe header in " << argv[numArgsProcessed+i] << " is not accepted.\n";
+            fail = true;
+        }
+       
+
         // Read the first data line
         if(!readNextLine(inputFiles[i], nextLine[i], minChrom, minPos))
         {
@@ -144,6 +166,11 @@ int main(int argc, char ** argv)
             nextLine[i].start = 0x7FFFFFFF;
         }
     }
+    if(fail)
+    {
+        return(-1);
+    }
+
     // write the header.
     ifprintf(outputFile, "%s\n", header.c_str());
 
@@ -225,15 +252,26 @@ bool readNextLine(IFILE inputFile, StoredInfo& nextLine, int& minChrom, int& min
         return(false);
     }
     // Parse the data line.
-    if(sscanf(dataLine.c_str(), "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%lf\t%d\t%d\t%d",
-              chromBuffer, &(nextLine.start), &(nextLine.end), 
-              &(nextLine.totalReads), &(nextLine.numDups), 
-              &(nextLine.numQCFail), &(nextLine.numMapped),
-              &(nextLine.numPaired), &(nextLine.numProper),
-              &(nextLine.numZeroMapQ), &(nextLine.numLT10MapQ),
-              &(nextLine.num255MapQ), &(nextLine.numMapQPass),
-              &avgMapQ, &(nextLine.avgMapQCount), 
-              &(nextLine.depth), &(nextLine.numQ20)) != 17)
+    if(fullHeader)
+    {
+        if(sscanf(dataLine.c_str(), "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%lf\t%d\t%d\t%d",
+                  chromBuffer, &(nextLine.start), &(nextLine.end), 
+                  &(nextLine.totalReads), &(nextLine.numDups), 
+                  &(nextLine.numQCFail), &(nextLine.numMapped),
+                  &(nextLine.numPaired), &(nextLine.numProper),
+                  &(nextLine.numZeroMapQ), &(nextLine.numLT10MapQ),
+                  &(nextLine.num255MapQ), &(nextLine.numMapQPass),
+                  &avgMapQ, &(nextLine.avgMapQCount), 
+                  &(nextLine.depth), &(nextLine.numQ20)) != 17)
+        {
+            std::cerr << "Failed reading line from " << inputFile->getFileName() << "\n";
+            exit(-1);
+        }
+    }
+    else if(sscanf(dataLine.c_str(), "%s\t%d\t%d\t%lf\t%d",
+                   chromBuffer, &(nextLine.start),
+                   &(nextLine.numZeroMapQ), 
+                   &avgMapQ, &(nextLine.avgMapQCount)) != 5)
     {
         std::cerr << "Failed reading line from " << inputFile->getFileName() << "\n";
         exit(-1);
@@ -275,22 +313,27 @@ void updateSummary(const StoredInfo& nextLine, StoredInfo& sumLine)
     sumLine.chromStr = nextLine.chromStr;
     sumLine.chrom = nextLine.chrom;
     sumLine.start = nextLine.start;
-    sumLine.end = nextLine.end;
 
-    sumLine.totalReads += nextLine.totalReads;
-    sumLine.numDups += nextLine.numDups;
-    sumLine.numQCFail += nextLine.numQCFail;
-    sumLine.numMapped += nextLine.numMapped;
-    sumLine.numPaired += nextLine.numPaired;
-    sumLine.numProper += nextLine.numProper;
     sumLine.numZeroMapQ += nextLine.numZeroMapQ;
-    sumLine.numLT10MapQ += nextLine.numLT10MapQ;
-    sumLine.num255MapQ += nextLine.num255MapQ;
-    sumLine.numMapQPass += nextLine.numMapQPass;
     sumLine.sumMapQ += nextLine.sumMapQ;
     sumLine.avgMapQCount += nextLine.avgMapQCount;
-    sumLine.depth += nextLine.depth;
-    sumLine.numQ20 += nextLine.numQ20;
+
+    if(fullHeader)
+    {
+        sumLine.end = nextLine.end;
+
+        sumLine.totalReads += nextLine.totalReads;
+        sumLine.numDups += nextLine.numDups;
+        sumLine.numQCFail += nextLine.numQCFail;
+        sumLine.numMapped += nextLine.numMapped;
+        sumLine.numPaired += nextLine.numPaired;
+        sumLine.numProper += nextLine.numProper;
+        sumLine.numLT10MapQ += nextLine.numLT10MapQ;
+        sumLine.num255MapQ += nextLine.num255MapQ;
+        sumLine.numMapQPass += nextLine.numMapQPass;
+        sumLine.depth += nextLine.depth;
+        sumLine.numQ20 += nextLine.numQ20;
+    }
 }
 
 
@@ -302,17 +345,27 @@ bool writeSummary(IFILE outputFile, StoredInfo& summaryLine)
     {
         avgMapQ = (double)(summaryLine.sumMapQ)/summaryLine.avgMapQCount;
     }
-    ifprintf(outputFile,
-             "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.3f\t%d\t%d\t%d\n",
-             summaryLine.chromStr.c_str(), summaryLine.start, summaryLine.end,
-             summaryLine.totalReads, summaryLine.numDups,
-             summaryLine.numQCFail, summaryLine.numMapped,
-             summaryLine.numPaired, summaryLine.numProper,
-             summaryLine.numZeroMapQ, summaryLine.numLT10MapQ,
-             summaryLine.num255MapQ, summaryLine.numMapQPass,
-             avgMapQ, summaryLine.avgMapQCount,
-             summaryLine.depth, summaryLine.numQ20);
-
+    if(fullHeader)
+    {
+        ifprintf(outputFile,
+                 "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.3f\t%d\t%d\t%d\n",
+                 summaryLine.chromStr.c_str(), summaryLine.start, summaryLine.end,
+                 summaryLine.totalReads, summaryLine.numDups,
+                 summaryLine.numQCFail, summaryLine.numMapped,
+                 summaryLine.numPaired, summaryLine.numProper,
+                 summaryLine.numZeroMapQ, summaryLine.numLT10MapQ,
+                 summaryLine.num255MapQ, summaryLine.numMapQPass,
+                 avgMapQ, summaryLine.avgMapQCount,
+                 summaryLine.depth, summaryLine.numQ20);
+    }
+    else
+    {
+        ifprintf(outputFile,
+                 "%s\t%d\t%d\t%.3f\t%d\n",
+                 summaryLine.chromStr.c_str(), summaryLine.start,
+                 summaryLine.numZeroMapQ, 
+                 avgMapQ, summaryLine.avgMapQCount);
+    }
     initStoredInfo(summaryLine);
     return(true);
 }
